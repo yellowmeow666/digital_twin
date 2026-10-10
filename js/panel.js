@@ -60,6 +60,15 @@ let history = [];
 let historyState = "ready";
 /** subscribeSelection 未导出时，名单点选只能改侧栏本地选中态。 */
 let selectionSyncMissing = false;
+/**
+ * 名单外壳："boot" | "empty" | "ready"。
+ * 2 秒快照只改文案和 class，不换按钮节点，避免点「定位」/名单时赶上 innerHTML 点空。
+ */
+let listShell = "";
+/** 当前名单按钮对应的设备 id 序列。搜索或设备集合变了才重建按钮。 */
+let listIdsKey = "";
+/** 详情结构签名。选中设备、指标键、走势形态变了才重建详情。 */
+let detailKey = "";
 
 /** 运行时注入，避免静态具名导入在缺导出时把整页打垮。 */
 const api = {
@@ -85,7 +94,7 @@ export function initPanel(roots) {
     });
   }
 
-  // 名单和详情都会被 innerHTML 换掉，事件委托绑在稳定的根节点上。
+  // 点击委托在稳定根节点上。名单项和定位按钮在 2 秒刷新时不会被换掉。
   listEl?.addEventListener("click", onListClick);
   detailEl?.addEventListener("click", onDetailClick);
   render();
@@ -215,12 +224,8 @@ function refreshHistory() {
 }
 
 function render() {
-  const listScroll = listEl ? listEl.scrollTop : 0;
-  const detailScroll = detailEl ? detailEl.scrollTop : 0;
   renderList();
   renderDetail();
-  if (listEl) listEl.scrollTop = listScroll;
-  if (detailEl) detailEl.scrollTop = detailScroll;
 }
 
 function renderList() {
@@ -228,16 +233,163 @@ function renderList() {
   const devices = readDevices();
 
   if (!snapshot) {
-    listEl.innerHTML = '<p class="boot-note">等待数据模块接入。接入后这里会列出场景中的设备。</p>';
+    ensureListShell("boot");
+    return;
+  }
+  if (devices.length === 0) {
+    ensureListShell("empty");
     return;
   }
 
-  if (devices.length === 0) {
+  const scroll = listEl.scrollTop;
+  ensureListShell("ready");
+  const filtered = devices.filter((device) => matchesQuery(device, query));
+  // 只按过滤后的 id 序列决定要不要换按钮。状态、告警不进这个 key。
+  const idsKey = filtered.map((device) => (device && device.id != null ? String(device.id) : "")).join("\0");
+  if (idsKey !== listIdsKey) {
+    rebuildListButtons(filtered);
+    listIdsKey = idsKey;
+    listEl.scrollTop = scroll;
+  }
+  patchListSummary(devices, filtered);
+  patchListButtons(devices);
+}
+
+/** 外壳三种互斥。ready 之后一直复用同一套摘要节点。 */
+function ensureListShell(mode) {
+  if (listShell === mode) return;
+  listShell = mode;
+  listIdsKey = "";
+  if (mode === "boot") {
+    listEl.innerHTML = '<p class="boot-note">等待数据模块接入。接入后这里会列出场景中的设备。</p>';
+    return;
+  }
+  if (mode === "empty") {
     listEl.innerHTML = '<p class="placeholder">当前快照里没有设备。</p>';
     return;
   }
 
-  const filtered = devices.filter((device) => matchesQuery(device, query));
+  listEl.replaceChildren();
+  const summary = document.createElement("p");
+  summary.className = "list-summary";
+  for (const field of ["total", "shown", "alarm", "warn"]) {
+    const span = document.createElement("span");
+    span.dataset.field = field;
+    if (field === "alarm") span.className = "summary-alarm";
+    if (field === "warn") span.className = "summary-warn";
+    if (field !== "total") span.hidden = true;
+    summary.append(span);
+  }
+  const note = document.createElement("p");
+  note.className = "filter-note";
+  note.dataset.field = "hidden-note";
+  note.hidden = true;
+  note.textContent = "已选设备被当前搜索隐藏，清空搜索后可在名单里看到。";
+  const empty = document.createElement("p");
+  empty.className = "placeholder";
+  empty.dataset.field = "empty-filter";
+  empty.hidden = true;
+  const items = document.createElement("div");
+  items.dataset.field = "items";
+  listEl.append(summary, note, empty, items);
+}
+
+function rebuildListButtons(filtered) {
+  const host = listEl.querySelector("[data-field='items']");
+  if (!host) return;
+  host.replaceChildren();
+  for (const device of filtered) host.append(createDeviceButton(device));
+}
+
+function createDeviceButton(device) {
+  const id = device && device.id != null ? String(device.id) : "";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "device-item";
+  btn.dataset.deviceId = id;
+
+  const top = document.createElement("span");
+  top.className = "device-item-top";
+  const name = document.createElement("span");
+  name.className = "device-item-name";
+  name.dataset.field = "name";
+  const flag = document.createElement("span");
+  flag.dataset.field = "flag";
+  flag.hidden = true;
+  top.append(name, flag);
+
+  const meta = document.createElement("span");
+  meta.className = "device-item-meta";
+  const sub = document.createElement("span");
+  sub.className = "device-item-sub";
+  sub.dataset.field = "sub";
+  const status = document.createElement("span");
+  status.dataset.field = "status";
+  meta.append(sub, status);
+
+  btn.append(top, meta);
+  paintDeviceButton(btn, device);
+  return btn;
+}
+
+function patchListButtons(devices) {
+  const host = listEl.querySelector("[data-field='items']");
+  if (!host) return;
+  const byId = new Map(devices.filter((device) => device && device.id != null).map((device) => [String(device.id), device]));
+  for (const btn of host.querySelectorAll(".device-item")) {
+    const device = byId.get(btn.dataset.deviceId || "");
+    if (device) paintDeviceButton(btn, device);
+  }
+}
+
+/** 就地改选中态、告警 class、状态文案和标记，不换 button 节点。 */
+function paintDeviceButton(btn, device) {
+  const id = device && device.id != null ? String(device.id) : "";
+  const status = typeof device.status === "string" ? device.status : "";
+  const selected = sameId(device && device.id, selectedId);
+  btn.classList.toggle("is-selected", selected);
+  btn.classList.toggle("is-alarm", status === "alarm");
+  btn.classList.toggle("is-warn", status === "warn");
+  if (selected) btn.setAttribute("aria-current", "true");
+  else btn.removeAttribute("aria-current");
+
+  const name = btn.querySelector("[data-field='name']");
+  if (name) name.textContent = device.name || id || "未命名设备";
+  const typeText = device.type ? labelOf(TYPE_LABEL, device.type) : "";
+  const sub = btn.querySelector("[data-field='sub']");
+  if (sub) sub.textContent = [typeText, id].filter(Boolean).join(" · ");
+  paintFlag(btn.querySelector("[data-field='flag']"), status);
+  paintStatus(btn.querySelector("[data-field='status']"), status);
+}
+
+function paintFlag(el, status) {
+  if (!el) return;
+  if (status === "alarm") {
+    el.hidden = false;
+    el.className = "flag flag-alarm";
+    el.textContent = "告警";
+    return;
+  }
+  if (status === "warn") {
+    el.hidden = false;
+    el.className = "flag flag-warn";
+    el.textContent = "警告";
+    return;
+  }
+  el.hidden = true;
+  el.className = "flag";
+  el.textContent = "";
+}
+
+function paintStatus(el, status) {
+  if (!el) return;
+  const key = typeof status === "string" ? status : "";
+  const label = STATUS_LABEL[key] || (key ? key : "未知");
+  el.className = STATUS_LABEL[key] ? `status status-${key}` : "status status-unknown";
+  el.textContent = label;
+}
+
+function patchListSummary(devices, filtered) {
   const alarmCount = devices.filter((device) => device && device.status === "alarm").length;
   const warnCount = devices.filter((device) => device && device.status === "warn").length;
   const selectedHidden =
@@ -245,73 +397,74 @@ function renderList() {
     devices.some((device) => sameId(device && device.id, selectedId)) &&
     !filtered.some((device) => sameId(device && device.id, selectedId));
 
-  const summaryBits = [`<span>共 ${devices.length} 台</span>`];
-  if (query) summaryBits.push(`<span>显示 ${filtered.length}</span>`);
-  if (alarmCount > 0) summaryBits.push(`<span class="summary-alarm">告警 ${alarmCount}</span>`);
-  if (warnCount > 0) summaryBits.push(`<span class="summary-warn">警告 ${warnCount}</span>`);
-
-  let body;
-  if (filtered.length === 0) {
-    body = `<p class="placeholder">没有匹配「${escapeHtml(query)}」的设备。</p>`;
-  } else {
-    body = filtered.map((device) => renderDeviceItem(device)).join("");
+  const total = listEl.querySelector("[data-field='total']");
+  const shown = listEl.querySelector("[data-field='shown']");
+  const alarm = listEl.querySelector("[data-field='alarm']");
+  const warn = listEl.querySelector("[data-field='warn']");
+  const note = listEl.querySelector("[data-field='hidden-note']");
+  const empty = listEl.querySelector("[data-field='empty-filter']");
+  if (total) total.textContent = `共 ${devices.length} 台`;
+  if (shown) {
+    shown.hidden = !query;
+    shown.textContent = `显示 ${filtered.length}`;
   }
-
-  const hiddenNote = selectedHidden
-    ? '<p class="filter-note">已选设备被当前搜索隐藏，清空搜索后可在名单里看到。</p>'
-    : "";
-
-  listEl.innerHTML =
-    `<p class="list-summary">${summaryBits.join("")}</p>` +
-    hiddenNote +
-    body;
-}
-
-function renderDeviceItem(device) {
-  const id = device && device.id != null ? String(device.id) : "";
-  const selected = sameId(device && device.id, selectedId);
-  const status = typeof device.status === "string" ? device.status : "";
-  const classes = ["device-item"];
-  if (selected) classes.push("is-selected");
-  if (status === "alarm") classes.push("is-alarm");
-  else if (status === "warn") classes.push("is-warn");
-
-  const typeText = device.type ? labelOf(TYPE_LABEL, device.type) : "";
-  const meta = [typeText, id].filter(Boolean).join(" · ");
-
-  return (
-    `<button type="button" class="${classes.join(" ")}" data-device-id="${escapeHtml(id)}"` +
-    `${selected ? ' aria-current="true"' : ""}>` +
-    `<span class="device-item-top">` +
-    `<span class="device-item-name">${escapeHtml(device.name || id || "未命名设备")}</span>` +
-    flagMarkup(status) +
-    `</span>` +
-    `<span class="device-item-meta">` +
-    `<span class="device-item-sub">${escapeHtml(meta)}</span>` +
-    statusMarkup(status) +
-    `</span>` +
-    `</button>`
-  );
-}
-
-function flagMarkup(status) {
-  if (status === "alarm") return '<span class="flag flag-alarm">告警</span>';
-  if (status === "warn") return '<span class="flag flag-warn">警告</span>';
-  return "";
+  if (alarm) {
+    alarm.hidden = alarmCount === 0;
+    alarm.textContent = `告警 ${alarmCount}`;
+  }
+  if (warn) {
+    warn.hidden = warnCount === 0;
+    warn.textContent = `警告 ${warnCount}`;
+  }
+  if (note) note.hidden = !selectedHidden;
+  if (empty) {
+    empty.hidden = filtered.length !== 0;
+    empty.textContent = `没有匹配「${query}」的设备。`;
+  }
 }
 
 function renderDetail() {
   if (!detailEl) return;
   const device = resolveSelected();
-
-  if (!device) {
-    detailEl.innerHTML =
-      '<p class="placeholder">未选中设备。在左侧名单或场景中点选一台设备后，这里会显示状态、指标和走势。</p>';
-    return;
+  const nextKey = detailStructureKey(device);
+  if (nextKey !== detailKey) {
+    const scroll = detailEl.scrollTop;
+    detailEl.innerHTML = device ? buildDetailMarkup(device) : (
+      '<p class="placeholder">未选中设备。在左侧名单或场景中点选一台设备后，这里会显示状态、指标和走势。</p>'
+    );
+    detailKey = nextKey;
+    detailEl.scrollTop = scroll;
   }
+  if (device) patchDetail(device);
+}
 
+/**
+ * 选中设备换了、指标/阈值键变了、走势从无到有或报错，才算结构变化。
+ * 数值抖动和采样变长不进 key。
+ */
+function detailStructureKey(device) {
+  if (!device) return "none";
+  const metricKeys = device.metrics && typeof device.metrics === "object" ? Object.keys(device.metrics) : [];
+  const thresholdKeys = device.thresholds && typeof device.thresholds === "object"
+    ? Object.keys(device.thresholds).filter((key) => device.thresholds[key] && typeof device.thresholds[key] === "object")
+    : [];
+  const historyKeys = historyState === "ready" && history.length > 0 ? collectMetricKeys(history) : [];
+  return [
+    String(device.id),
+    historyState,
+    history.length === 0 ? "empty" : "points",
+    historyKeys.join(","),
+    metricKeys.join(","),
+    thresholdKeys.join(","),
+    device.type ? "type" : "",
+    device.area ? "area" : "",
+    device.id != null ? "id" : "",
+  ].join("|");
+}
+
+function buildDetailMarkup(device) {
   const rows = [
-    `<p class="detail-row"><span>状态</span><strong>${statusMarkup(device.status)}</strong></p>`,
+    `<p class="detail-row"><span>状态</span><strong data-field="status-slot">${statusMarkup(device.status)}</strong></p>`,
   ];
   if (device.type) {
     rows.push(
@@ -325,14 +478,79 @@ function renderDetail() {
     rows.push(`<p class="detail-row"><span>编号</span><strong>${escapeHtml(device.id)}</strong></p>`);
   }
 
-  detailEl.innerHTML =
+  return (
     `<h3 class="detail-name">${escapeHtml(device.name || "未命名设备")}</h3>` +
     renderFocusButton() +
     rows.join("") +
     `<p class="section-label">指标</p>` +
     renderMetrics(device) +
     renderThresholds(device.thresholds) +
-    renderHistory(device);
+    renderHistory(device)
+  );
+}
+
+/** 2 秒刷新：状态、指标文字、走势 svg 都写回原节点。 */
+function patchDetail(device) {
+  const nameEl = detailEl.querySelector(".detail-name");
+  if (nameEl) nameEl.textContent = device.name || "未命名设备";
+  const statusSlot = detailEl.querySelector("[data-field='status-slot'] .status");
+  paintStatus(statusSlot, device.status);
+
+  const focusBtn = detailEl.querySelector("[data-action='focus']");
+  if (focusBtn) focusBtn.disabled = typeof api.focusDevice !== "function";
+
+  const metricList = detailEl.querySelector("[data-block='metrics']");
+  if (metricList && device.metrics && typeof device.metrics === "object") {
+    for (const li of metricList.querySelectorAll("li")) {
+      const key = li.dataset.metric;
+      if (!key || !Object.prototype.hasOwnProperty.call(device.metrics, key)) continue;
+      const value = device.metrics[key];
+      const level = metricLevel(device, key, value);
+      li.className = level;
+      const title = thresholdTitle(device.thresholds, key);
+      if (title) li.title = title;
+      else li.removeAttribute("title");
+      const valueEl = li.querySelector("[data-field='value']");
+      if (valueEl) valueEl.textContent = formatMetric(value);
+    }
+  }
+
+  const thresholdList = detailEl.querySelector("[data-block='thresholds']");
+  if (thresholdList && device.thresholds) {
+    for (const li of thresholdList.querySelectorAll("li")) {
+      const key = li.dataset.metric;
+      const th = key && device.thresholds[key];
+      if (!th) continue;
+      const bits = [];
+      if (typeof th.warn === "number") bits.push(`警告 ${formatMetric(th.warn)}`);
+      if (typeof th.alarm === "number") bits.push(`告警 ${formatMetric(th.alarm)}`);
+      const valueEl = li.querySelector("[data-field='value']");
+      if (valueEl) valueEl.textContent = bits.join(" / ") || "—";
+    }
+  }
+
+  const sparks = detailEl.querySelector("[data-block='sparks']");
+  if (sparks) {
+    for (const card of sparks.querySelectorAll(".spark-card")) {
+      const key = card.dataset.metric;
+      if (!key) continue;
+      const threshold = device.thresholds && device.thresholds[key];
+      const latest = latestMetric(key);
+      const level = metricLevel(device, key, latest);
+      card.classList.toggle("is-alarm", level === "is-alarm");
+      card.classList.toggle("is-warn", level === "is-warn");
+      const valueEl = card.querySelector("[data-field='value']");
+      if (valueEl) valueEl.textContent = formatMetric(latest);
+      const svg = card.querySelector("svg.sparkline");
+      if (svg) paintSparkline(svg, key, threshold, level);
+    }
+  }
+  const note = detailEl.querySelector(".history-note");
+  if (note && historyState === "ready" && history.length > 0) {
+    note.textContent = history.length < 2
+      ? "采样点较少，走势会随刷新变长。"
+      : `最近 ${history.length} 个采样点`;
+  }
 }
 
 function renderFocusButton() {
@@ -362,13 +580,13 @@ function renderMetrics(device) {
     const level = metricLevel(device, key, value);
     const title = thresholdTitle(device.thresholds, key);
     return (
-      `<li class="${level}"${title ? ` title="${escapeHtml(title)}"` : ""}>` +
+      `<li class="${level}" data-metric="${escapeHtml(key)}"${title ? ` title="${escapeHtml(title)}"` : ""}>` +
       `<span class="metric-key">${escapeHtml(labelOf(METRIC_LABEL, key))}</span>` +
-      `<span class="metric-value">${escapeHtml(formatMetric(value))}</span>` +
+      `<span class="metric-value" data-field="value">${escapeHtml(formatMetric(value))}</span>` +
       `</li>`
     );
   });
-  return `<ul class="metrics">${items.join("")}</ul>`;
+  return `<ul class="metrics" data-block="metrics">${items.join("")}</ul>`;
 }
 
 function renderThresholds(thresholds) {
@@ -381,11 +599,11 @@ function renderThresholds(thresholds) {
     if (typeof th.warn === "number") bits.push(`警告 ${formatMetric(th.warn)}`);
     if (typeof th.alarm === "number") bits.push(`告警 ${formatMetric(th.alarm)}`);
     return (
-      `<li><span class="metric-key">${escapeHtml(labelOf(METRIC_LABEL, key))}</span>` +
-      `<span class="metric-value">${escapeHtml(bits.join(" / ") || "—")}</span></li>`
+      `<li data-metric="${escapeHtml(key)}"><span class="metric-key">${escapeHtml(labelOf(METRIC_LABEL, key))}</span>` +
+      `<span class="metric-value" data-field="value">${escapeHtml(bits.join(" / ") || "—")}</span></li>`
     );
   });
-  return `<p class="section-label">阈值</p><ul class="metrics">${items.join("")}</ul>`;
+  return `<p class="section-label">阈值</p><ul class="metrics" data-block="thresholds">${items.join("")}</ul>`;
 }
 
 function renderHistory(device) {
@@ -406,9 +624,9 @@ function renderHistory(device) {
 
   const cards = keys.map((key) => renderSparkCard(device, key)).join("");
   const waiting = history.length < 2
-    ? '<p class="history-note">采样点较少，走势会随刷新变长。</p>'
-    : `<p class="history-note">最近 ${history.length} 个采样点</p>`;
-  return `<p class="section-label">历史走势</p><div class="sparklines">${cards}</div>${waiting}`;
+    ? "采样点较少，走势会随刷新变长。"
+    : `最近 ${history.length} 个采样点`;
+  return `<p class="section-label">历史走势</p><div class="sparklines" data-block="sparks">${cards}</div><p class="history-note">${escapeHtml(waiting)}</p>`;
 }
 
 function renderSparkCard(device, key) {
@@ -417,22 +635,28 @@ function renderSparkCard(device, key) {
   const latest = latestMetric(key);
   const scale = thresholdScaleText(threshold);
   return (
-    `<section class="spark-card ${level}">` +
+    `<section class="spark-card ${level}" data-metric="${escapeHtml(key)}">` +
     `<div class="spark-head">` +
     `<span class="metric-key">${escapeHtml(labelOf(METRIC_LABEL, key))}</span>` +
-    `<span class="metric-value">${escapeHtml(formatMetric(latest))}</span>` +
+    `<span class="metric-value" data-field="value">${escapeHtml(formatMetric(latest))}</span>` +
     `</div>` +
-    renderSparkline(key, threshold, level) +
+    `<svg class="sparkline" viewBox="0 0 ${SPARK_W} ${SPARK_H}" role="img" aria-label="${escapeHtml(labelOf(METRIC_LABEL, key))}走势">${sparklineInner(key, threshold, level)}</svg>` +
     (scale ? `<p class="spark-scale">${escapeHtml(scale)}</p>` : "") +
     `</section>`
   );
+}
+
+/** 折线画进已有的 svg，不换 svg 节点。 */
+function paintSparkline(svg, key, threshold, level) {
+  svg.setAttribute("aria-label", `${labelOf(METRIC_LABEL, key)}走势`);
+  svg.innerHTML = sparklineInner(key, threshold, level);
 }
 
 /**
  * 把单个指标的历史画成简易折线。每个指标用自己的纵轴，
  * 并把 warn / alarm 阈值扩进范围，虚线才能落在图内。
  */
-function renderSparkline(key, threshold, level) {
+function sparklineInner(key, threshold, level) {
   const samples = [];
   for (const point of history) {
     const value = point && point.metrics ? point.metrics[key] : undefined;
@@ -486,14 +710,11 @@ function renderSparkline(key, threshold, level) {
     area = `<polygon points="${areaPoints}" fill="${stroke}" fill-opacity="0.16" stroke="none" />`;
   }
 
-  const label = labelOf(METRIC_LABEL, key);
   return (
-    `<svg class="sparkline" viewBox="0 0 ${SPARK_W} ${SPARK_H}" role="img" aria-label="${escapeHtml(label)}走势">` +
     area +
     guides.join("") +
     `<polyline points="${coords.join(" ")}" fill="none" stroke="${stroke}" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" />` +
-    `<circle cx="${lastX}" cy="${lastY}" r="2.6" fill="#e7eef6" />` +
-    `</svg>`
+    `<circle cx="${lastX}" cy="${lastY}" r="2.6" fill="#e7eef6" />`
   );
 }
 

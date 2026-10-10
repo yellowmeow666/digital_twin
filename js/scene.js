@@ -260,7 +260,7 @@ export function createScene(containerEl) {
 
   setupEnvironment(renderer, scene);
   if (forceLowFx) {
-    console.info('[scene] lowfx=1，跳过 OutlinePass，选中只用地面选中环');
+    console.info('[scene] lowfx=1，跳过 OutlinePass，选中改用本体提亮');
   } else {
     setupPost(renderer, scene, camera, width, height, (next) => {
       composer = next.composer;
@@ -301,7 +301,7 @@ export function createScene(containerEl) {
     if (!outlinePass || outlinePass.enabled === false) return;
     outlinePass.enabled = false;
     outlinePass.selectedObjects = [];
-    console.warn(`[scene] 已关闭 OutlinePass（${reason}），选中退回地面选中环`);
+    console.warn(`[scene] 已关闭 OutlinePass（${reason}），选中改用本体提亮`);
   }
 
   function deviceGroups() {
@@ -345,6 +345,7 @@ export function createScene(containerEl) {
     }
     // 选中设备还没挂上 Group 时先不锁 key，下一帧再试。
     applyOutline(groups);
+    syncSelectionHighlight();
     ensureLabels(groups);
   }
 
@@ -366,6 +367,73 @@ export function createScene(containerEl) {
       });
     }
     outlinePass.selectedObjects = meshes;
+  }
+
+  /** 描边关掉之后，用克隆材质做暖色 emissive，避免只剩地面黄环。 */
+  let highlightKey = '';
+  /** @type {Array<{ mesh: THREE.Mesh, material: THREE.Material | THREE.Material[], clones: THREE.Material[] }>} */
+  const highlightRestore = [];
+
+  function syncSelectionHighlight() {
+    const outlineOn = !!(outlinePass && outlinePass.enabled !== false);
+    const id = !outlineOn && selectedId != null ? String(selectedId) : '';
+    if (!id) {
+      if (highlightKey !== '') {
+        restoreSelectionHighlight();
+        highlightKey = '';
+      }
+      return;
+    }
+    const group = typeof devicesApi.getDeviceGroup === 'function'
+      ? devicesApi.getDeviceGroup(selectedId)
+      : null;
+    if (!group) return;
+    const key = `${id}:${group.uuid}`;
+    if (key === highlightKey) return;
+    restoreSelectionHighlight();
+    paintSelectionHighlight(group);
+    highlightKey = key;
+  }
+
+  function paintSelectionHighlight(group) {
+    group.traverse((obj) => {
+      if (!obj.isMesh || obj.userData.isSelectionRing === true) return;
+      const source = Array.isArray(obj.material) ? obj.material : [obj.material];
+      const next = source.slice();
+      const clones = [];
+      let changed = false;
+      for (let i = 0; i < source.length; i += 1) {
+        const mat = source[i];
+        // 状态灯、状态带、液体自带 emissive，跳过，免得盖掉状态色。
+        // 共享材质先 clone，只把克隆挂到这台设备上。
+        if (!canHighlightMaterial(mat)) continue;
+        const cloned = mat.clone();
+        cloned.emissive.setHex(0xffd28a);
+        cloned.emissiveIntensity = 0.85;
+        next[i] = cloned;
+        clones.push(cloned);
+        changed = true;
+      }
+      if (!changed) return;
+      const previous = obj.material;
+      obj.material = Array.isArray(previous) ? next : next[0];
+      highlightRestore.push({ mesh: obj, material: previous, clones });
+    });
+  }
+
+  function restoreSelectionHighlight() {
+    for (const rec of highlightRestore) {
+      rec.mesh.material = rec.material;
+      for (const clone of rec.clones) clone.dispose();
+    }
+    highlightRestore.length = 0;
+  }
+
+  function canHighlightMaterial(material) {
+    if (!material || !material.emissive || typeof material.emissive.getHex !== 'function') return false;
+    if (material.userData && material.userData.skipSelectHighlight) return false;
+    // 非黑 emissive 是状态色或液体自发光，不动。
+    return material.emissive.getHex() === 0;
   }
 
   function ensureLabels(groups) {
