@@ -35,3 +35,11 @@ python3 -m http.server 8080
 ## 协作说明
 
 开发共用分支：`feat/digital-twin-mvp`。推送前请先 `git pull --rebase`，不要 force push，不要直接推 `main`。
+
+### 迭代 3 · 视觉
+
+这一迭代用本地 vendor 的官方 Three.js addons 提升画面：RoomEnvironment 环境光，EffectComposer/OutlinePass 选中描边与后期，CSS2DRenderer 设备标签。页面仍是静态站点，依赖都在本地 vendor，运行时不需要 npm 或 CDN，用 `python3 -m http.server 8080` 启动。
+
+![首屏截图](docs/screenshot.png)
+
+（截图由测试提供，待补充）
