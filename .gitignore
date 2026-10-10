@@ -15,7 +15,8 @@ venv/
 .env.*
 !.env.example
 dist/
-build/
+# 只忽略仓库根目录的构建产物。vendor 里 Three.js 官方包自带 build/，需要入库。
+/build/
 node_modules/
 coverage/
 .cache/

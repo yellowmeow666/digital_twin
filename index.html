@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>数字孪生</title>
   <link rel="stylesheet" href="css/style.css" />
-  <!-- Three.js r160。小杨的 scene/devices 通过 import map 引用 three 与 three/addons/。 -->
+  <!-- Three.js r160 走本地 vendor。scene/devices 仍通过 import map 引用 three 与 three/addons/。 -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "./vendor/three@0.160.0/build/three.module.js",
+      "three/addons/": "./vendor/three@0.160.0/examples/jsm/"
     }
   }
   </script>
@@ -37,6 +37,16 @@
       <div id="device-detail" class="device-detail"></div>
     </aside>
   </div>
-  <script type="module" src="js/main.js"></script>
+  <script type="module">
+    // 静态依赖图在 three 加载失败时不会执行 main.js，占位文案会一直停在准备中。
+    // 用动态 import 接住模块图失败，改成可操作的错误提示。
+    import("./js/main.js").catch((error) => {
+      console.error("[index] 模块加载失败", error);
+      const placeholder = document.querySelector("#viewport-placeholder");
+      if (!placeholder) return;
+      placeholder.hidden = false;
+      placeholder.textContent = "三维库加载失败，请确认 vendor/three 文件齐全后刷新";
+    });
+  </script>
 </body>
 </html>
