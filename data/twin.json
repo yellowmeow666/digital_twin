@@ -1,0 +1,36 @@
+{
+  "devices": [
+    {
+      "id": "pump-01",
+      "name": "冷却水泵 A",
+      "type": "pump",
+      "status": "running",
+      "metrics": { "temperature": 42.5, "power": 12.8, "flow": 36.2 },
+      "position": { "x": -4, "y": 0.6, "z": -2 }
+    },
+    {
+      "id": "tank-01",
+      "name": "储液罐 1",
+      "type": "tank",
+      "status": "idle",
+      "metrics": { "temperature": 28.0, "power": 1.2, "level": 62.5 },
+      "position": { "x": 0, "y": 1.2, "z": -3 }
+    },
+    {
+      "id": "conveyor-01",
+      "name": "传送带 B",
+      "type": "conveyor",
+      "status": "running",
+      "metrics": { "temperature": 35.4, "power": 6.5, "speed": 1.4 },
+      "position": { "x": 3.5, "y": 0.35, "z": 0 }
+    },
+    {
+      "id": "robot-01",
+      "name": "装配机器人",
+      "type": "robot",
+      "status": "alarm",
+      "metrics": { "temperature": 58.2, "power": 9.1, "load": 81.0 },
+      "position": { "x": -1.5, "y": 0.8, "z": 2.5 }
+    }
+  ]
+}
