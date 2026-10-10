@@ -1,7 +1,7 @@
 /**
  * Three.js 场景：灯光、地面、简易厂房框、PerspectiveCamera、OrbitControls。
- * 依赖页面 import map：three @0.160.0 与 three/addons/
- * 导出：createScene
+ * 依赖 import map：three @0.160.0 与 three/addons/（或页面约定的 vendor）。
+ * 导出：createScene（含 focusOn）
  */
 
 import * as THREE from 'three';
@@ -9,7 +9,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /**
  * @param {HTMLElement} containerEl
- * @returns {{ scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, controls: OrbitControls, render: () => void, resize: () => void }}
+ * @returns {{ scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, controls: OrbitControls, render: () => void, resize: () => void, focusOn: (position: {x:number,y:number,z:number}, opts?: {duration?: number}) => void }}
  */
 export function createScene(containerEl) {
   if (!containerEl) throw new Error('createScene requires a container element');
@@ -63,6 +63,9 @@ export function createScene(containerEl) {
   grid.position.y = 0.01;
   scene.add(grid);
 
+  /** @type {{ start: number, duration: number, fromCam: THREE.Vector3, toCam: THREE.Vector3, fromTarget: THREE.Vector3, toTarget: THREE.Vector3 } | null} */
+  let focusAnim = null;
+
   function resize() {
     const w = containerEl.clientWidth || window.innerWidth;
     const h = containerEl.clientHeight || window.innerHeight;
@@ -71,12 +74,42 @@ export function createScene(containerEl) {
     renderer.setSize(w, h);
   }
 
+  function easeInOut(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
   function render() {
+    if (focusAnim) {
+      const u = Math.min(1, (performance.now() - focusAnim.start) / focusAnim.duration);
+      const e = easeInOut(u);
+      camera.position.lerpVectors(focusAnim.fromCam, focusAnim.toCam, e);
+      controls.target.lerpVectors(focusAnim.fromTarget, focusAnim.toTarget, e);
+      if (u >= 1) focusAnim = null;
+    }
     controls.update();
     renderer.render(scene, camera);
   }
 
+  /**
+   * 平滑飞向目标点。相机停在目标斜上方，OrbitControls.target 对准目标。
+   * @param {{ x: number, y?: number, z: number }} position
+   * @param {{ duration?: number }} [opts]
+   */
+  function focusOn(position, opts = {}) {
+    if (!position) return;
+    const target = new THREE.Vector3(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    const offset = new THREE.Vector3(4.5, 3.5, 4.5);
+    focusAnim = {
+      start: performance.now(),
+      duration: opts.duration ?? 600,
+      fromCam: camera.position.clone(),
+      toCam: target.clone().add(offset),
+      fromTarget: controls.target.clone(),
+      toTarget: target,
+    };
+  }
+
   window.addEventListener('resize', resize);
 
-  return { scene, camera, renderer, controls, render, resize };
+  return { scene, camera, renderer, controls, render, resize, focusOn };
 }

@@ -1,15 +1,18 @@
 /**
- * 按 twin 数据生成设备；raycaster 点选；选中高亮；数据更新时刷新外观。
- * 导出：mountDevices、onSelect
+ * 设备网格：按 status 变色、点选、外部 setSelected、focusDevice。
+ * 导出：mountDevices、onSelect、setSelected、focusDevice
  */
 
 import * as THREE from 'three';
-import { subscribe } from './data.js';
+import { getDevice, selectDevice, subscribe, subscribeSelection } from './data.js';
 
 const STATUS_COLOR = {
+  normal: 0x22c55e,
+  warn: 0xf59e0b,
+  alarm: 0xef4444,
+  // 兼容旧值
   running: 0x22c55e,
   idle: 0x38bdf8,
-  alarm: 0xef4444,
   offline: 0x64748b,
 };
 
@@ -23,10 +26,11 @@ let selectedId = null;
 const meshes = new Map();
 /** @type {THREE.Group | null} */
 let root = null;
-/** @type {{ scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer } | null} */
+/** @type {{ scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer, focusOn?: Function } | null} */
 let ctxRef = null;
 let pickingBound = false;
-let unsub = null;
+let unsubData = null;
+let unsubSel = null;
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -91,17 +95,14 @@ function syncDevices(list) {
       mesh.geometry.dispose();
       mesh.material.dispose();
       meshes.delete(id);
-      if (selectedId === id) emitSelect(null);
     }
   }
 }
 
-function emitSelect(device) {
-  selectedId = device ? device.id : null;
+function paintSelection() {
   for (const [id, mesh] of meshes) {
-    applyMaterial(mesh, mesh.userData.device || { status: 'idle' }, id === selectedId);
+    applyMaterial(mesh, mesh.userData.device || { status: 'normal' }, id === selectedId);
   }
-  if (typeof selectHandler === 'function') selectHandler(device);
 }
 
 function onPointerDown(event) {
@@ -113,25 +114,32 @@ function onPointerDown(event) {
   raycaster.setFromCamera(pointer, camera);
   const hits = raycaster.intersectObjects([...meshes.values()], false);
   if (hits.length === 0) {
-    emitSelect(null);
+    selectDevice(null);
     return;
   }
-  const device = hits[0].object.userData.device ?? null;
-  emitSelect(device);
+  const id = hits[0].object.userData.deviceId ?? null;
+  selectDevice(id);
 }
 
-/**
- * 注册选中回调。点击设备时 handler(device)；点空白取消选中时 handler(null)。
- * @param {(device: object | null) => void} handler
- */
 export function onSelect(handler) {
   selectHandler = typeof handler === 'function' ? handler : null;
 }
 
-/**
- * 把设备挂到场景。ctx 为 createScene 的返回值；twin 为 loadTwin 的返回值。
- * 内部会 subscribe 数据更新以刷新外观（status 变色等）。
- */
+/** 从列表等外部设置选中；三维高亮跟随。传 null 取消。 */
+export function setSelected(id) {
+  selectDevice(id);
+}
+
+/** 选中并飞向设备。供「定位」按钮调用。 */
+export function focusDevice(id) {
+  if (id == null) return;
+  selectDevice(id);
+  const device = getDevice(id);
+  if (device?.position && typeof ctxRef?.focusOn === 'function') {
+    ctxRef.focusOn(device.position);
+  }
+}
+
 export function mountDevices(ctx, twin) {
   if (!ctx?.scene || !ctx?.camera || !ctx?.renderer) {
     throw new Error('mountDevices expects createScene() context');
@@ -152,8 +160,15 @@ export function mountDevices(ctx, twin) {
     pickingBound = true;
   }
 
-  if (unsub) unsub();
-  unsub = subscribe((snapshot) => {
+  if (unsubData) unsubData();
+  unsubData = subscribe((snapshot) => {
     syncDevices(snapshot.devices || []);
+  });
+
+  if (unsubSel) unsubSel();
+  unsubSel = subscribeSelection((device) => {
+    selectedId = device ? device.id : null;
+    paintSelection();
+    if (typeof selectHandler === 'function') selectHandler(device);
   });
 }
