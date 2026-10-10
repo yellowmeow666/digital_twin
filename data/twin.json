@@ -1,0 +1,57 @@
+{
+  "devices": [
+    {
+      "id": "pump-01",
+      "name": "冷却水泵 A",
+      "type": "pump",
+      "area": "冷却区",
+      "status": "normal",
+      "metrics": { "temperature": 42.5, "power": 12.8, "flow": 36.2 },
+      "thresholds": {
+        "temperature": { "warn": 50, "alarm": 60 },
+        "power": { "warn": 15, "alarm": 20 }
+      },
+      "position": { "x": -4, "y": 0.6, "z": -2 }
+    },
+    {
+      "id": "tank-01",
+      "name": "储液罐 1",
+      "type": "tank",
+      "area": "存储区",
+      "status": "normal",
+      "metrics": { "temperature": 28.0, "power": 1.2, "level": 62.5 },
+      "thresholds": {
+        "temperature": { "warn": 40, "alarm": 55 },
+        "level": { "warn": 80, "alarm": 95 }
+      },
+      "position": { "x": 0, "y": 1.2, "z": -3 }
+    },
+    {
+      "id": "conveyor-01",
+      "name": "传送带 B",
+      "type": "conveyor",
+      "area": "输送区",
+      "status": "normal",
+      "metrics": { "temperature": 35.4, "power": 6.5, "speed": 1.4 },
+      "thresholds": {
+        "temperature": { "warn": 45, "alarm": 55 },
+        "power": { "warn": 10, "alarm": 14 }
+      },
+      "position": { "x": 3.5, "y": 0.35, "z": 0 }
+    },
+    {
+      "id": "robot-01",
+      "name": "装配机器人",
+      "type": "robot",
+      "area": "装配区",
+      "status": "alarm",
+      "metrics": { "temperature": 58.2, "power": 9.1, "load": 81.0 },
+      "thresholds": {
+        "temperature": { "warn": 45, "alarm": 55 },
+        "load": { "warn": 70, "alarm": 85 },
+        "power": { "warn": 12, "alarm": 16 }
+      },
+      "position": { "x": -1.5, "y": 0.8, "z": 2.5 }
+    }
+  ]
+}

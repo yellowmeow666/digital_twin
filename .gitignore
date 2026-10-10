@@ -1,0 +1,22 @@
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+dist/
+# 只忽略仓库根目录的构建产物。vendor 里 Three.js 官方包自带 build/，需要入库。
+/build/
+node_modules/
+coverage/
+.cache/

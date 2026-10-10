@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数字孪生</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23101820'/%3E%3Crect x='3' y='3' width='10' height='10' rx='1' fill='none' stroke='%23e2a23b' stroke-width='1.4'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Three.js r160 走本地 vendor。scene/devices 仍通过 import map 引用 three 与 three/addons/。 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three@0.160.0/build/three.module.js",
+      "three/addons/": "./vendor/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar sidebar-left" aria-label="设备概览">
+      <header class="sidebar-header">
+        <p class="eyebrow">Digital Twin</p>
+        <h1>设备概览</h1>
+      </header>
+      <div class="list-tools">
+        <label class="search-label" for="device-search">搜索设备</label>
+        <input
+          id="device-search"
+          class="device-search"
+          type="search"
+          placeholder="名称、类型或 id"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div id="device-list" class="device-list"></div>
+    </aside>
+
+    <main id="viewport" class="viewport" aria-label="三维场景">
+      <p id="viewport-placeholder" class="viewport-placeholder">正在准备三维场景…</p>
+    </main>
+
+    <aside class="sidebar sidebar-right" aria-label="设备详情">
+      <header class="sidebar-header">
+        <p class="eyebrow">Selection</p>
+        <h2>设备详情</h2>
+      </header>
+      <div id="device-detail" class="device-detail"></div>
+    </aside>
+  </div>
+  <script type="module">
+    // 静态依赖图在 three 加载失败时不会执行 main.js，占位文案会一直停在准备中。
+    // 用动态 import 接住模块图失败，改成可操作的错误提示。
+    import("./js/main.js").catch((error) => {
+      console.error("[index] 模块加载失败", error);
+      const placeholder = document.querySelector("#viewport-placeholder");
+      if (!placeholder) return;
+      placeholder.hidden = false;
+      placeholder.textContent = "三维库加载失败，请确认 vendor/three 文件齐全后刷新";
+    });
+  </script>
+</body>
+</html>
