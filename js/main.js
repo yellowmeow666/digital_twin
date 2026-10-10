@@ -1,14 +1,16 @@
 /**
- * 组装启动。只消费场景侧已经导出的命名接口：
- * - js/data.js：loadTwin()、subscribe(listener)
- * - js/scene.js：createScene(container) → { render, resize, ... }
- * - js/devices.js：mountDevices(ctx, twin)、onSelect(handler)
+ * 组装启动。新接口用命名空间导入后再判断是否存在，
+ * 缺导出时页面仍能起来，对应能力禁用或只更新侧栏。
+ *
+ * 名单点选只调 devices.setSelected(id)。
+ * 场景点选由 devices 内部处理，侧栏通过 data.subscribeSelection 跟上。
+ * 走势读 data.getHistory(id)，定位按钮调 devices.focusDevice(id)。
  */
 
-import { loadTwin, subscribe } from "./data.js";
-import { createScene } from "./scene.js";
-import { mountDevices, onSelect } from "./devices.js";
-import { bindSubscribe, initPanel, setSelected } from "./panel.js";
+import * as dataApi from "./data.js";
+import * as sceneApi from "./scene.js";
+import * as devicesApi from "./devices.js";
+import { bindActions, bindSelection, bindSubscribe, initPanel } from "./panel.js";
 
 const viewport = document.querySelector("#viewport");
 const placeholder = document.querySelector("#viewport-placeholder");
@@ -16,6 +18,13 @@ const placeholder = document.querySelector("#viewport-placeholder");
 initPanel({
   listEl: document.querySelector("#device-list"),
   detailEl: document.querySelector("#device-detail"),
+  searchEl: document.querySelector("#device-search"),
+});
+
+bindActions({
+  setSelected: devicesApi.setSelected,
+  focusDevice: devicesApi.focusDevice,
+  getHistory: dataApi.getHistory,
 });
 
 boot().catch((error) => {
@@ -24,16 +33,24 @@ boot().catch((error) => {
 });
 
 async function boot() {
-  // 顺序固定：数据 → 场景 → 设备挂载 → 选中与刷新接到侧栏。
-  const twin = await loadTwin();
-  const ctx = createScene(viewport);
-  mountDevices(ctx, twin);
+  if (typeof dataApi.loadTwin !== "function") {
+    throw new Error("loadTwin 不可用");
+  }
+  if (typeof sceneApi.createScene !== "function") {
+    throw new Error("createScene 不可用");
+  }
+  if (typeof devicesApi.mountDevices !== "function") {
+    throw new Error("mountDevices 不可用");
+  }
 
-  onSelect((device) => {
-    setSelected(device ?? null);
-  });
-  // subscribe 在 twin 已加载时会立刻回放一次，侧栏列表不用再手动拉。
-  bindSubscribe(subscribe);
+  // 顺序固定：数据 → 场景 → 设备挂载 → 选中订阅与快照订阅。
+  const twin = await dataApi.loadTwin();
+  const ctx = sceneApi.createScene(viewport);
+  devicesApi.mountDevices(ctx, twin);
+
+  // 不走 onSelect。场景点击已经会 selectDevice，和名单的 setSelected 汇合到同一条选中订阅。
+  bindSelection(dataApi.subscribeSelection);
+  bindSubscribe(dataApi.subscribe);
 
   hideViewportMessage();
   // 占位层隐藏后再量一次容器，避免首帧用到尚未撑开的尺寸。
