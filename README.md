@@ -40,6 +40,7 @@ python3 -m http.server 8080
 
 这一迭代用本地 vendor 的官方 Three.js addons 提升画面：RoomEnvironment 环境光，EffectComposer/OutlinePass 选中描边与后期，CSS2DRenderer 设备标签。页面仍是静态站点，依赖都在本地 vendor，运行时不需要 npm 或 CDN，用 `python3 -m http.server 8080` 启动。
 
-![首屏截图](docs/screenshot.png)
+- **低配模式**：机器较慢时，打开 [http://localhost:8080/?lowfx=1](http://localhost:8080/?lowfx=1)，会关闭选中描边，改用地面选中环和设备本体提亮。
+- **自动降级**：没有显卡（软件渲染）或帧率低于 40fps 时，页面会自动关闭描边，效果同低配模式。
 
-（截图由测试提供，待补充）
+![首屏截图](docs/screenshot.png)
