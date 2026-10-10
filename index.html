@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数字孪生</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Three.js r160。小杨的 scene/devices 通过 import map 引用 three 与 three/addons/。 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar sidebar-left" aria-label="设备概览">
+      <header class="sidebar-header">
+        <p class="eyebrow">Digital Twin</p>
+        <h1>设备概览</h1>
+      </header>
+      <div id="device-list" class="device-list"></div>
+    </aside>
+
+    <main id="viewport" class="viewport" aria-label="三维场景">
+      <p id="viewport-placeholder" class="viewport-placeholder">正在准备三维场景…</p>
+    </main>
+
+    <aside class="sidebar sidebar-right" aria-label="设备详情">
+      <header class="sidebar-header">
+        <p class="eyebrow">Selection</p>
+        <h2>设备详情</h2>
+      </header>
+      <div id="device-detail" class="device-detail"></div>
+    </aside>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
